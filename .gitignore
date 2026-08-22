@@ -14,3 +14,7 @@ wheels/
 
 # Log files, settings
 imgui.ini
+*.md
+assets/robot/
+assets/motions/
+

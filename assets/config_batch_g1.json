@@ -1,0 +1,9 @@
+{
+  "import_folder": "/mnt/data/raw_bvh/bones-seed/soma_uniform",
+  "export_folder": "/mnt/soma-out/unitree_g1_csv",
+  "batch_size": 50,
+  "retargeter": "Newton",
+  "retarget_source": "soma",
+  "retarget_target": "unitree_g1",
+  "retarget_source_facing_direction": "Mujoco"
+}

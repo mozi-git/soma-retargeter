@@ -11,6 +11,7 @@ import soma_retargeter.assets.bvh as bvh_utils
 import soma_retargeter.utils.newton_utils as newton_utils
 import soma_retargeter.utils.io_utils as io_utils
 import soma_retargeter.pipelines.utils as pipeline_utils
+from soma_retargeter.utils.robot_description import get_robot_mjcf_path
 from soma_retargeter.pipelines.ik_objectives import IKSmoothJointFilter
 from soma_retargeter.animation.skeleton import Skeleton, SkeletonInstance
 from soma_retargeter.animation.animation_buffer import AnimationBuffer
@@ -71,8 +72,7 @@ class NewtonPipeline:
 
         if (self.target_type == pipeline_utils.TargetType.UNITREE_G1):
             self.robot_builder = newton.ModelBuilder()
-            self.robot_builder.add_mjcf(
-                newton.utils.download_asset("unitree_g1") / "mjcf/g1_29dof_rev_1_0.xml")
+            self.robot_builder.add_mjcf(get_robot_mjcf_path("unitree_g1"))
 
             self.human_robot_scaler = HumanToRobotScaler(
                 skeleton, retargeter_config['model_height'], io_utils.get_config_file(retargeter_config['human_robot_scaler_config']))
@@ -114,6 +114,53 @@ class NewtonPipeline:
                 self.initialization_pose.set_local_transforms(init_anim.get_local_transforms(0))
                 self.num_initialization_frames = retargeter_config.get('num_initialization_frames', _DEFAULT_NUM_INITIALIZATION_FRAMES)
                 self.num_stabilization_frames = retargeter_config.get('num_stabilization_frames', _DEFAULT_NUM_STABILIZATION_FRAMES)
+
+        elif (self.target_type == pipeline_utils.TargetType.UNITREE_H2):
+            # H2 support (31 DOF)
+            self.robot_builder = newton.ModelBuilder()
+            self.robot_builder.add_mjcf(get_robot_mjcf_path("unitree_h2"))
+
+            self.human_robot_scaler = HumanToRobotScaler(
+                skeleton, retargeter_config['model_height'], io_utils.get_config_file(retargeter_config['human_robot_scaler_config']))
+
+            self.num_body_count = self.robot_builder.body_count
+            self.num_dofs = self.robot_builder.joint_dof_count
+            self.ik_model = self._build_model(1)
+
+            (
+                self.mapped_joints,
+                self.mapped_joint_indices,
+                self.mapped_body_link_pos_data,
+                self.mapped_body_link_rot_data
+            ) = self._build_target_mapping(
+                self.ik_model,
+                self.human_robot_scaler.skeleton,
+                retargeter_config)
+
+            smooth_joint_filter_objective_body_masks = retargeter_config.get('smooth_joint_filter_objective_body_masks', None)
+            if smooth_joint_filter_objective_body_masks is not None:
+                self.smooth_joint_filter_coord_masks = newton_utils.create_joint_coord_masks(
+                    self.ik_model, smooth_joint_filter_objective_body_masks, 0.0)
+
+            effector_names = self.human_robot_scaler.effector_names()
+            self.target_effector_indices = [effector_names.index(name) for name in self.mapped_joints]
+            self.feet_effector_indices = [
+                self.mapped_joints.index("LeftFoot"),
+                self.mapped_joints.index("RightFoot")]
+
+            self.feet_stabilizer = FeetStabilizer(io_utils.get_config_file(retargeter_config['feet_stabilizer_config']))
+            self.joint_limit_clamper = JointLimitClamper(self.ik_model)
+
+            self.initialization_pose = None
+            self.num_initialization_frames = 0
+            self.num_stabilization_frames = 0
+            if (retargeter_config['initialization_pose']):
+                init_skel, init_anim = bvh_utils.load_bvh(io_utils.get_config_file(retargeter_config['initialization_pose']))
+                self.initialization_pose = SkeletonInstance(init_skel, [0, 0, 0], wp.transform_identity())
+                self.initialization_pose.set_local_transforms(init_anim.get_local_transforms(0))
+                self.num_initialization_frames = retargeter_config.get('num_initialization_frames', _DEFAULT_NUM_INITIALIZATION_FRAMES)
+                self.num_stabilization_frames = retargeter_config.get('num_stabilization_frames', _DEFAULT_NUM_STABILIZATION_FRAMES)
+
         else:
             raise ValueError("Unsupported robot type.")
 
@@ -233,7 +280,9 @@ class NewtonPipeline:
 
         #import time
         num_frames_to_remove = self.num_initialization_frames + self.num_stabilization_frames
-        joint_q_data = [np.full((len(self.input_targets[i]),), None) for i in range(num_envs)]
+        joint_q_data = [
+            np.zeros((len(self.input_targets[i]), self.ik_model.joint_coord_count), dtype=np.float32)
+            for i in range(num_envs)]
         for frame in trange(self.max_frames, desc="[INFO] Retargeting Motions"):
             if frame <= num_frames_to_remove:
                 smooth_joint_filter_objective.set_weight(self.smooth_joint_filter_weight * (frame / float(num_frames_to_remove)))
@@ -271,7 +320,7 @@ class NewtonPipeline:
                 if frame > (len(self.input_targets[env])-1):
                     continue
 
-                joint_q_data[env][frame] = data[env]
+                joint_q_data[env][frame, :] = data[env]
 
             #end_time = time.time()
             #print(f"Time taken for frame {frame}: {end_time - start_time} seconds")

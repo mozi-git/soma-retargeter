@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  soma-retargeter:
+    image: yuanli-ai-acr-registry.cn-shanghai.cr.aliyuncs.com/demo/locomotion:soma-retargeter
+    container_name: soma-retargeter-dev
+
+    # 端口映射（Viser 可视化）
+    ports:
+      - "8081:8080"
+
+    # 体积挂载
+    volumes:
+      - .:/workspace/soma-retargeter
+
+    # 工作目录
+    working_dir: /workspace/soma-retargeter
+
+    # 环境变量
+    environment:
+      - VIRTUAL_ENV=/opt/venv
+      - PATH=/opt/venv/bin:$PATH
+      - PYTHONUNBUFFERED=1
+
+    # 交互模式
+    stdin_open: true
+    tty: true
+
+    # 默认命令（进入 bash）
+    command: /bin/bash

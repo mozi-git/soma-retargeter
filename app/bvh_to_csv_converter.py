@@ -12,6 +12,7 @@ import soma_retargeter.utils.math_utils as math_utils
 import soma_retargeter.assets.bvh as bvh_utils
 import soma_retargeter.assets.csv as csv_utils
 import soma_retargeter.utils.io_utils as io_utils
+from soma_retargeter.utils.robot_description import get_robot_mjcf_path
 import soma_retargeter.pipelines.utils as pipeline_utils
 
 from soma_retargeter.renderers.skeleton_renderer import SkeletonRenderer
@@ -64,8 +65,7 @@ class Viewer:
         self.viewer.register_ui_callback(lambda ui: self.gui(ui), position="free")
 
         g1_builder = newton.ModelBuilder()
-        g1_builder.add_mjcf(
-            newton.utils.download_asset("unitree_g1") / "mjcf/g1_29dof_rev_1_0.xml")
+        g1_builder.add_mjcf(get_robot_mjcf_path("unitree_g1"))
         
         self.num_robots = 1
         self.robot_offsets = [wp.transform(wp.vec3(0.0, i - (self.num_robots - 1) / 2.0, 0.0), wp.quat_identity()) for i in range(self.num_robots)]
@@ -428,10 +428,23 @@ class Viewer:
         retarget_source = self.config['retarget_source']
         retarget_solver = self.config['retargeter']
         retarget_target = self.config["retarget_target"]
+        csv_config = csv_utils.get_csv_config(retarget_target)
+        retargeter_config = None
+        retargeter_config_file = self.config.get("retargeter_config_file", "")
+        if retargeter_config_file:
+            retargeter_config_path = pathlib.Path(retargeter_config_file)
+            retargeter_config = io_utils.load_json(retargeter_config_path)
+            print(f"[INFO]: Using retargeter config override: {retargeter_config_path}")
+
         retarget_pipeline = None
         if (retarget_solver == 'Newton'):
             import soma_retargeter.pipelines.newton_pipeline as newton_pipeline
-            retarget_pipeline = newton_pipeline.NewtonPipeline(bvh_skeleton, retarget_source, retarget_target)
+            retarget_pipeline = newton_pipeline.NewtonPipeline(
+                bvh_skeleton,
+                retarget_source,
+                retarget_target,
+                retarget_config=retargeter_config,
+            )
         if retarget_pipeline is None:
             print(f"[ERROR]: Invalid retarget solver selected [{retarget_solver}]. Use 'Newton'.")
             exit(-1)
@@ -465,7 +478,7 @@ class Viewer:
                     csv_buffer = csv_buffers[i]
                     dst_path = export_path / pathlib.Path(batch[i]).relative_to(import_path).with_suffix(".csv")
                     dst_path.parent.mkdir(parents=True, exist_ok=True)
-                    csv_utils.save_csv(dst_path, csv_buffer)
+                    csv_utils.save_csv(dst_path, csv_buffer, csv_config)
 
             nb_retargeted_motions += len(batch)
 
